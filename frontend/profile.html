@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title data-i18n="nav_profile">Profile — Krishi.AI</title>
+  <script>/* theme before first paint - the module script runs too late */
+    try { document.documentElement.dataset.theme = localStorage.getItem('krishi.theme')
+      || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'); } catch {}
+  </script>
+  <link rel="icon" href="/assets/icon.svg" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" />
+  <link rel="stylesheet" href="/css/app.css" />
+</head>
+<body>
+  <a class="skip-link" href="#main" data-i18n="skip_to_content">Skip to content</a>
+
+  <main class="page" id="main">
+    <div class="page-head">
+      <h1 data-i18n="profile_heading">Profile and Settings</h1>
+      <p data-i18n="profile_intro">Your details, your saved results, and your account.</p>
+    </div>
+
+    <div class="grid grid-2">
+      <section class="card">
+        <div class="card-title"><h2 style="margin:0" data-i18n="profile_your_details">Your details</h2><span id="account-pill"></span></div>
+        <form id="profile-form" novalidate>
+          <div class="field">
+            <label for="full_name" data-i18n="profile_name">Your name</label>
+            <input type="text" id="full_name" name="full_name" maxlength="120"
+                   placeholder="e.g. Ramesh Kumar" data-i18n-placeholder="profile_name_placeholder" />
+          </div>
+          <div class="field">
+            <label for="pincode" data-i18n="profile_pincode">Pincode</label>
+            <input type="text" id="pincode" name="pincode" inputmode="numeric"
+                   pattern="\d{6}" maxlength="6" placeholder="6 digits" data-i18n-placeholder="profile_pincode_placeholder" />
+            <span class="hint" data-i18n="pincode_prompt">Enter your pincode for location-based assistance</span>
+          </div>
+          <div class="field">
+            <label for="language" data-i18n="profile_preferred_language">Preferred language</label>
+            <select id="language" name="language"></select>
+          </div>
+          <button class="btn" id="save-profile" type="submit" data-i18n="profile_save">Save details</button>
+          <div id="profile-message" style="margin-top:12px"></div>
+        </form>
+      </section>
+
+      <section class="card" id="account-card">
+        <div class="card-title"><h2 style="margin:0" data-i18n="profile_account">Account</h2></div>
+        <div id="account-body"></div>
+      </section>
+    </div>
+
+    <section class="card" style="margin-top:32px">
+      <div class="card-title">
+        <h2 style="margin:0" data-i18n="profile_saved_results">Saved results</h2>
+        <span class="spacer"></span>
+        <label class="sr-only" for="tool-filter" data-i18n="profile_filter_tool">Filter by tool</label>
+        <select id="tool-filter" style="width:auto">
+          <option value="" data-i18n="profile_all_tools">All tools</option>
+          <option value="crop" data-i18n="nav_crop">Crop</option>
+          <option value="disease" data-i18n="nav_disease">Disease</option>
+          <option value="fertilizer" data-i18n="nav_fertilizer">Fertilizer</option>
+          <option value="water" data-i18n="nav_water">Water</option>
+          <option value="rainfall" data-i18n="nav_rainfall">Rainfall</option>
+          <option value="market" data-i18n="nav_market">Prices</option>
+        </select>
+      </div>
+      <div id="history"></div>
+    </section>
+  </main>
+
+  <script type="module">
+    import { api, auth, ensureSession } from '/js/api.js';
+    import { renderShell, escapeHtml, formatDate, showError, showEmpty,
+             withBusy, summarise, TOOLS, t } from '/js/ui.js';
+    import { mountChatWidget } from '/js/widget.js';
+    import { LANGUAGES, setLanguage } from '/js/i18n.js';
+
+    await renderShell('profile');
+    mountChatWidget();
+
+    const TOOL_NAMES = Object.fromEntries(TOOLS.map((t) => [t.id, t.title]));
+    const profileForm = document.getElementById('profile-form');
+    const profileMessage = document.getElementById('profile-message');
+    const accountBody = document.getElementById('account-body');
+    const accountPill = document.getElementById('account-pill');
+    const history = document.getElementById('history');
+    const toolFilter = document.getElementById('tool-filter');
+
+    document.getElementById('language').innerHTML = LANGUAGES
+      .map((l) => `<option value="${l.code}">${l.native} — ${l.english}</option>`).join('');
+
+    function fillProfile(user) {
+      document.getElementById('full_name').value = user.full_name || '';
+      document.getElementById('pincode').value = user.pincode || '';
+      document.getElementById('language').value = user.language || 'en';
+      accountPill.innerHTML = user.is_guest
+        ? '<span class="pill pill-warn" data-i18n="profile_guest">Guest</span>'
+        : `<span class="pill pill-ok">${escapeHtml(user.username)}</span>`;
+      renderAccount(user);
+    }
+
+    /* Guests get a link to the sign-in page; registered users see sign-out. */
+    function renderAccount(user) {
+      if (!user.is_guest) {
+        accountBody.innerHTML = `
+          <p>${escapeHtml(t('profile_signed_in_as'))} <strong>${escapeHtml(user.username)}</strong>.
+             ${escapeHtml(t('profile_follows_devices'))}</p>
+          <p class="hint">${escapeHtml(t('profile_joined'))} ${escapeHtml(formatDate(user.created_at))}</p>
+          <button class="btn btn-secondary" id="sign-out" type="button" data-i18n="profile_signout">Sign out</button>`;
+        document.getElementById('sign-out').addEventListener('click', () => {
+          auth.clear();
+          location.reload();
+        });
+        return;
+      }
+
+      accountBody.innerHTML = `
+        <p data-i18n="profile_guest_body">You are using Krishi.AI as a guest on this device. Create a free account to
+           keep your chats and results, and reach them from your phone too.</p>
+        <div class="row">
+          <a class="btn" href="/login?mode=register&next=/profile" data-i18n="profile_create">Create account</a>
+          <a class="btn btn-quiet" href="/login?next=/profile" data-i18n="profile_have_account">I already have one</a>
+        </div>`;
+    }
+
+    profileForm.addEventListener('submit', (event) => {
+      event.preventDefault();
+      if (!profileForm.reportValidity()) return;
+      const payload = {
+        full_name: document.getElementById('full_name').value.trim() || null,
+        pincode: document.getElementById('pincode').value.trim() || null,
+        language: document.getElementById('language').value,
+      };
+      withBusy(document.getElementById('save-profile'), t('common_working'), async () => {
+        profileMessage.innerHTML = '';
+        try {
+          const user = await api.updateProfile(payload);
+          auth.setUser(user);
+          setLanguage(user.language);
+          profileMessage.innerHTML =
+            '<div class="alert alert-success" role="status"><span aria-hidden="true">✅</span>' +
+            '<div><strong data-i18n="common_saved">Saved.</strong></div></div>';
+        } catch (error) {
+          showError(profileMessage, error);
+        }
+      });
+    });
+
+    async function loadHistory() {
+      history.innerHTML = '<div class="skeleton" style="height:80px"></div>';
+      try {
+        const rows = await api.predictions(toolFilter.value || undefined);
+        if (!rows.length) {
+          showEmpty(history, t('profile_no_results_title'),
+            t('profile_no_results_body'), '📋');
+          return;
+        }
+        history.innerHTML = `<div class="table-scroll"><table class="data-table">
+          <thead><tr><th data-i18n="profile_col_tool">Tool</th><th data-i18n="profile_col_result">Result</th><th data-i18n="profile_col_when">When</th></tr></thead>
+          <tbody>${rows.map((r) => `<tr>
+            <td><span class="pill pill-info">${escapeHtml(TOOL_NAMES[r.tool] || r.tool)}</span></td>
+            <td>${escapeHtml(summarise(r))}</td>
+            <td style="white-space:nowrap;color:var(--text-muted)">${escapeHtml(formatDate(r.created_at))}</td>
+          </tr>`).join('')}</tbody>
+        </table></div>`;
+      } catch (error) {
+        showError(history, error);
+      }
+    }
+    toolFilter.addEventListener('change', loadHistory);
+    document.addEventListener('krishi:language', loadHistory);
+
+    (async () => {
+      try {
+        await ensureSession();
+        fillProfile(await api.me());
+        await loadHistory();
+      } catch (error) {
+        showError(accountBody, error);
+        showError(history, error);
+      }
+    })();
+  </script>
+</body>
+</html>

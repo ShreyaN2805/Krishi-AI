@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title data-i18n="profile_signin">Sign in — Krishi.AI</title>
+  <script>/* theme before first paint - the module script runs too late */
+    try { document.documentElement.dataset.theme = localStorage.getItem('krishi.theme')
+      || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'); } catch {}
+  </script>
+  <link rel="icon" href="/assets/icon.svg" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" />
+  <link rel="stylesheet" href="/css/app.css" />
+</head>
+<body>
+  <a class="skip-link" href="#main" data-i18n="skip_to_content">Skip to content</a>
+
+  <main class="page" id="main" style="max-width:880px">
+    <div class="grid grid-2" style="align-items:stretch">
+      <div class="login-photo" style="background-image:url('/assets/photos/login-side.webp')" aria-hidden="true"></div>
+
+      <div>
+        <div class="page-head">
+          <h1 id="heading" data-i18n="profile_signin">Sign in</h1>
+          <p data-i18n="profile_guest_body">You are using Krishi.AI as a guest on this device. Create a free account to
+             keep your chats and results, and reach them from your phone too.</p>
+        </div>
+
+        <section class="card">
+          <!-- Sign in -->
+          <form id="login-form" novalidate>
+            <div class="field">
+              <label for="login-username" data-i18n="profile_username">Username</label>
+              <input type="text" id="login-username" name="username" required maxlength="64"
+                     autocomplete="username" autofocus />
+            </div>
+            <div class="field">
+              <label for="login-password" data-i18n="profile_password">Password</label>
+              <input type="password" id="login-password" name="password" required maxlength="72"
+                     autocomplete="current-password" />
+            </div>
+            <button class="btn btn-block" id="do-login" type="submit" data-i18n="profile_signin">Sign in</button>
+            <button class="btn btn-quiet btn-block" type="button" data-mode="register"
+                    style="margin-top:8px" data-i18n="profile_create_instead">Create an account instead</button>
+          </form>
+
+          <!-- Create account -->
+          <form id="register-form" novalidate hidden>
+            <div class="field">
+              <label for="reg-name" data-i18n="profile_name">Your name</label>
+              <input type="text" id="reg-name" name="full_name" maxlength="120" autocomplete="name"
+                     placeholder="e.g. Ramesh Kumar" data-i18n-placeholder="profile_name_placeholder" />
+            </div>
+            <div class="field">
+              <label for="reg-username" data-i18n="profile_choose_username">Choose a username</label>
+              <input type="text" id="reg-username" name="username" required minlength="3"
+                     maxlength="64" pattern="[a-zA-Z0-9_.\-]{3,64}" autocomplete="username" />
+              <span class="hint" data-i18n="profile_username_hint">Letters, numbers, dot, dash or underscore</span>
+            </div>
+            <div class="field">
+              <label for="reg-password" data-i18n="profile_choose_password">Choose a password</label>
+              <input type="password" id="reg-password" name="password" required minlength="8"
+                     maxlength="72" autocomplete="new-password" />
+              <span class="hint" data-i18n="profile_password_hint">At least 8 characters</span>
+            </div>
+            <button class="btn btn-block" id="do-register" type="submit" data-i18n="profile_create">Create account</button>
+            <button class="btn btn-quiet btn-block" type="button" data-mode="login"
+                    style="margin-top:8px" data-i18n="profile_have_account">I already have one</button>
+          </form>
+
+          <div id="message" style="margin-top:12px"></div>
+        </section>
+      </div>
+    </div>
+  </main>
+
+  <script type="module">
+    import { api, auth, syncLanguage } from '/js/api.js';
+    import { renderShell, showError, withBusy, t } from '/js/ui.js';
+
+    await renderShell('login');
+
+    const params = new URLSearchParams(location.search);
+    // Only ever a path on this site - never an absolute URL from the query
+    // string, which would make this page an open redirect.
+    const rawNext = params.get('next') || '/';
+    const next = rawNext.startsWith('/') && !rawNext.startsWith('//') ? rawNext : '/';
+
+    // Already signed in with a real account: nothing to do here.
+    if (auth.user && !auth.user.is_guest) location.replace('/profile');
+
+    const loginForm = document.getElementById('login-form');
+    const registerForm = document.getElementById('register-form');
+    const heading = document.getElementById('heading');
+    const message = document.getElementById('message');
+
+    function setMode(mode) {
+      const register = mode === 'register';
+      loginForm.hidden = register;
+      registerForm.hidden = !register;
+      heading.dataset.i18n = register ? 'profile_create' : 'profile_signin';
+      heading.textContent = t(heading.dataset.i18n);
+      message.innerHTML = '';
+      (register ? registerForm : loginForm).querySelector('input').focus();
+    }
+    document.querySelectorAll('[data-mode]').forEach((btn) =>
+      btn.addEventListener('click', () => setMode(btn.dataset.mode)));
+    setMode(params.get('mode') === 'register' ? 'register' : 'login');
+
+    if (params.has('expired')) {
+      showError(message, { message: t('login_expired') });
+    }
+
+    function submit(form, button, label, action) {
+      form.addEventListener('submit', (event) => {
+        event.preventDefault();
+        if (!form.reportValidity()) return;
+        withBusy(button, label, async () => {
+          message.innerHTML = '';
+          try {
+            await syncLanguage(auth.save(await action()));
+            location.assign(next);
+          } catch (error) {
+            showError(message, error);
+          }
+        });
+      });
+    }
+
+    submit(loginForm, document.getElementById('do-login'), t('profile_signing_in'), () =>
+      api.login({
+        username: document.getElementById('login-username').value.trim(),
+        password: document.getElementById('login-password').value,
+      }));
+
+    submit(registerForm, document.getElementById('do-register'), t('profile_creating'), () =>
+      api.register({
+        username: document.getElementById('reg-username').value.trim(),
+        password: document.getElementById('reg-password').value,
+        full_name: document.getElementById('reg-name').value.trim() || null,
+      }));
+  </script>
+</body>
+</html>
